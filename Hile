@@ -1,466 +1,342 @@
--- // KEY CONFIGURATION //
-local correctKey = "Wyvern"
-local keyLink = "https://discord.gg/HHyvyWDy3a"
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local localPlayer = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 
--- // KEY SYSTEM INTERFACE //
-local ScreenGui = Instance.new("ScreenGui")
-local MainFrame = Instance.new("Frame")
-local Title = Instance.new("TextLabel")
-local KeyInput = Instance.new("TextBox")
-local VerifyBtn = Instance.new("TextButton")
-local GetKeyBtn = Instance.new("TextButton")
+-- ===== KONFIGURASYON =====
+local Config = {
+    SilentAim = true,          -- True = bakmadan vur
+    RageBot = true,            -- True = ragebot açık
+    TriggerBot = true,         -- True = crosshair kafaya gelince otomatik ateş
+    Hitchance = 85,            -- %85 isabet şansı (0-100)
+    SpreadMultiplier = 0.85,   -- Spread azaltma (1 = normal, 0 = tam isabet)
+    VisCheck = true,           -- True = duvar arkası kontrolü açık
+    Wallbang = true,           -- True = duvar arkasına da vur
+    TargetPart = "Head",       -- Head / HumanoidRootPart / Random
+    FOV = 360,                 -- 360 POV
+    MaxDistance = 1000,        -- Maksimum mesafe
+    AutoShoot = true,          -- TriggerBot için otomatik ateş
+}
 
-ScreenGui.Parent = game:GetService("CoreGui")
-ScreenGui.Name = "KeySystemDinas"
+-- ===== YARDIMCI FONKSİYONLAR =====
+local function isAlive(player)
+    local char = player.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0 and hum.Parent ~= nil
+end
 
-MainFrame.Name = "MainFrame"
-MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Position = UDim2.new(0.5, -125, 0.5, -75)
-MainFrame.Size = UDim2.new(0, 250, 0, 150)
-MainFrame.Active = true
-MainFrame.Draggable = true
+local function getTargetPart(character)
+    if Config.TargetPart == "Head" then
+        local head = character:FindFirstChild("Head")
+        if head then return head end
+    elseif Config.TargetPart == "HumanoidRootPart" then
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if root then return root end
+    elseif Config.TargetPart == "Random" then
+        local parts = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"}
+        for _, partName in ipairs(parts) do
+            local part = character:FindFirstChild(partName)
+            if part then return part end
+        end
+    end
+    return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Head")
+end
 
-Title.Parent = MainFrame
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "DINAS PROJECT | KEY SYSTEM"
-Title.TextColor3 = Color3.new(1, 1, 1)
-Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+-- ===== VISIBLE CHECK + WALLBANG (Duvar Kontrolü) =====
+local function isVisible(origin, targetPos)
+    if not Config.VisCheck then return true end
+    
+    local direction = (targetPos - origin).Unit
+    local distance = (targetPos - origin).Magnitude
+    local ray = Ray.new(origin, direction * distance)
+    
+    local hit, position = workspace:FindPartOnRayWithIgnoreList(ray, {localPlayer.Character, camera})
+    
+    if hit then
+        local distToTarget = distance
+        local distToHit = (position - origin).Magnitude
+        
+        if distToHit >= distToTarget - 2 then
+            return true -- Direk görüş var
+        end
+        
+        -- Wallbang kontrolü
+        if Config.Wallbang then
+            local hitParent = hit.Parent
+            if hitParent then
+                -- Oyuncuya ait bir şey değilse duvar/eşya demektir
+                local hitPlayer = Players:GetPlayerFromCharacter(hitParent)
+                if not hitPlayer then
+                    -- Duvar/engel varsa yine de vur (wallbang)
+                    -- Penetration kontrolü: material kontrolü yapabilirsin
+                    local material = hit.Material
+                    if material and material ~= Enum.Material.Water then
+                        return true
+                    end
+                end
+            end
+        end
+        
+        return false -- Görüş yok ve wallbang kapalı
+    end
+    
+    return true
+end
 
-KeyInput.Parent = MainFrame
-KeyInput.PlaceholderText = "Enter Key here..."
-KeyInput.Size = UDim2.new(0, 200, 0, 30)
-KeyInput.Position = UDim2.new(0.5, -100, 0.4, 0)
-KeyInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-KeyInput.TextColor3 = Color3.new(1, 1, 1)
+-- ===== HITCHANCE KONTROLÜ =====
+local function checkHitchance()
+    if Config.Hitchance >= 100 then return true end
+    local random = math.random(1, 100)
+    return random <= Config.Hitchance
+end
 
-VerifyBtn.Parent = MainFrame
-VerifyBtn.Text = "Verify"
-VerifyBtn.Size = UDim2.new(0, 90, 0, 30)
-VerifyBtn.Position = UDim2.new(0.1, 0, 0.7, 0)
-VerifyBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-VerifyBtn.TextColor3 = Color3.new(1, 1, 1)
+-- ===== SPREAD HESAPLAMA =====
+local function applySpread(origin, direction)
+    if Config.SpreadMultiplier >= 1 then return direction end
+    
+    local spreadAngle = (1 - Config.SpreadMultiplier) * 0.05
+    local theta = math.random() * 2 * math.pi
+    local phi = math.random() * spreadAngle
+    
+    local right = camera.CFrame.RightVector
+    local up = camera.CFrame.UpVector
+    
+    local newDir = direction + (right * math.cos(theta) + up * math.sin(theta)) * phi
+    return newDir.Unit
+end
 
-GetKeyBtn.Parent = MainFrame
-GetKeyBtn.Text = "Get Key"
-GetKeyBtn.Size = UDim2.new(0, 90, 0, 30)
-GetKeyBtn.Position = UDim2.new(0.55, 0, 0.7, 0)
-GetKeyBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-GetKeyBtn.TextColor3 = Color3.new(1, 1, 1)
+-- ===== EN YAKIN HEDEFİ BUL =====
+local function getBestTarget()
+    local character = localPlayer.Character
+    if not character then return nil, nil end
+    
+    local origin = camera.CFrame.Position
+    local mousePos = UserInputService:GetMouseLocation()
+    
+    local bestTarget = nil
+    local bestPart = nil
+    local bestDist = Config.FOV
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer and isAlive(player) then
+            local targetPart = getTargetPart(player.Character)
+            if targetPart then
+                local targetPos = targetPart.Position
+                local distance = (targetPos - origin).Magnitude
+                
+                if distance <= Config.MaxDistance then
+                    -- Görüş kontrolü (VisCheck + Wallbang)
+                    if not Config.VisCheck or isVisible(origin, targetPos) then
+                        
+                        local screenPoint = camera:WorldToScreenPoint(targetPos)
+                        if screenPoint.Z > 0 then
+                            local screenPos = Vector2.new(screenPoint.X, screenPoint.Y)
+                            local screenDist = (screenPos - mousePos).Magnitude
+                            
+                            if screenDist <= bestDist then
+                                bestDist = screenDist
+                                bestTarget = player
+                                bestPart = targetPart
+                            end
+                        else
+                            -- 360 POV - ekran dışı hedefler
+                            if Config.FOV >= 360 then
+                                if distance < bestDist then
+                                    bestDist = distance
+                                    bestTarget = player
+                                    bestPart = targetPart
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return bestTarget, bestPart
+end
 
-local function StartScript()
-ScreenGui:Destroy()
+-- ===== TRIGGERBOT =====
+local function triggerBotCheck()
+    if not Config.TriggerBot or not Config.AutoShoot then return false end
+    
+    local character = localPlayer.Character
+    if not character then return false end
+    
+    local mousePos = UserInputService:GetMouseLocation()
+    local mouseRay = camera:ScreenPointToRay(mousePos.X, mousePos.Y)
+    
+    local hit, hitPos = workspace:FindPartOnRay(mouseRay, localPlayer.Character)
+    
+    if hit then
+        local parent = hit.Parent
+        if parent then
+            local humanoid = parent:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local player = Players:GetPlayerFromCharacter(parent)
+                if player and player ~= localPlayer then
+                    local head = parent:FindFirstChild("Head")
+                    if head and hit == head then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    
+    return false
+end
 
-local LibraryUrl = "https://raw.githubusercontent.com/Vovabro46/trash/refs/heads/main/Test.lua"
-local Success, Library = pcall(function()
-    return loadstring(game:HttpGet(LibraryUrl))()
+-- ===== BULLETHANDLER HOOK (Silent Aim) =====
+local function hookBulletHandler()
+    local replicatedStorage = game:GetService("ReplicatedStorage")
+    local moduleScripts = replicatedStorage:FindFirstChild("ModuleScripts") or replicatedStorage:FindFirstChild("Modules")
+    
+    if not moduleScripts then
+        for _, child in ipairs(replicatedStorage:GetChildren()) do
+            if child:IsA("Folder") and (child.Name:lower():find("gun") or child.Name:lower():find("weapon") or child.Name:lower():find("module")) then
+                moduleScripts = child
+                break
+            end
+        end
+    end
+    
+    if not moduleScripts then
+        warn("[Ragebot] BulletHandler module not found!")
+        return false
+    end
+    
+    local bulletHandler = moduleScripts:FindFirstChild("BulletHandler", true)
+    if not bulletHandler then
+        for _, child in ipairs(moduleScripts:GetDescendants()) do
+            if child.Name:lower():find("bullet") or child.Name:lower():find("fire") or child.Name:lower():find("shoot") then
+                bulletHandler = child
+                break
+            end
+        end
+    end
+    
+    if not bulletHandler then return false end
+    
+    local success, module = pcall(function()
+        return require(bulletHandler)
     end)
+    
+    if not success then return false end
+    
+    local oldFire = module.Fire or module.fire or module.Shoot or module.shoot
+    
+    if not oldFire then
+        for _, name in ipairs({"Fire", "fire", "Shoot", "shoot", "FireBullet", "fireBullet", "SendBullet"}) do
+            if module[name] then
+                oldFire = module[name]
+                break
+            end
+        end
+    end
+    
+    if not oldFire then
+        warn("[Ragebot] Fire function not found!")
+        return false
+    end
+    
+    module.Fire = function(...)
+        local args = {...}
+        local p6 = args[1] or args
+        
+        if Config.SilentAim or Config.RageBot then
+            local target, targetPart = getBestTarget()
+            
+            if target and targetPart then
+                if not checkHitchance() then
+                    return oldFire(...)
+                end
+                
+                local origin = p6.Origin or p6.origin or (p6 and p6.Position)
+                if not origin and type(p6) == "table" then
+                    origin = p6.CFrame and p6.CFrame.Position or camera.CFrame.Position
+                end
+                
+                if origin then
+                    local targetPos = targetPart.Position
+                    local newDirection = (targetPos - origin).Unit
+                    
+                    newDirection = applySpread(origin, newDirection)
+                    
+                    if p6.Direction ~= nil then
+                        p6.Direction = newDirection
+                    end
+                    if p6.direction ~= nil then
+                        p6.direction = newDirection
+                    end
+                    if p6.CFrame then
+                        p6.CFrame = CFrame.new(origin, origin + newDirection)
+                    end
+                end
+            end
+        end
+        
+        return oldFire(...)
+    end
+    
+    module.__index = module
+    
+    return true
+end
 
-    if not Success or not Library then return end
+-- ===== MOUSE BUTTON SIMULATION (TriggerBot) =====
+local function simulateMouseClick()
+    if not Config.AutoShoot then return end
+    
+    local virtualInput = game:GetService("VirtualInputManager")
+    if virtualInput then
+        virtualInput:SendMouseButtonEvent(
+            UserInputService:GetMouseLocation().X,
+            UserInputService:GetMouseLocation().Y,
+            0,
+            true,
+            game,
+            0
+        )
+        task.wait(0.05)
+        virtualInput:SendMouseButtonEvent(
+            UserInputService:GetMouseLocation().X,
+            UserInputService:GetMouseLocation().Y,
+            0,
+            false,
+            game,
+            0
+        )
+    end
+end
 
-        local Players = game:GetService("Players")
-        local RunService = game : GetService("RunService")
-        local Workspace = game : GetService("Workspace")
-        local UserInputService = game : GetService("UserInputService")
-        local LocalPlayer = Players.LocalPlayer
-        local Camera = Workspace.CurrentCamera
+-- ===== ANA DÖNGÜ =====
+local function init()
+    local hooked = hookBulletHandler()
+    if not hooked then
+        warn("[Ragebot] Trying alternative hook methods...")
+    end
+    
+    RunService.RenderStepped:Connect(function()
+        if triggerBotCheck() then
+            simulateMouseClick()
+        end
+    end)
+    
+    print("[Ragebot] Loaded successfully!")
+    print("[Config] SilentAim:", Config.SilentAim)
+    print("[Config] RageBot:", Config.RageBot)
+    print("[Config] TriggerBot:", Config.TriggerBot)
+    print("[Config] Wallbang:", Config.Wallbang)
+    print("[Config] VisCheck:", Config.VisCheck)
+    print("[Config] Hitchance:", Config.Hitchance .. "%")
+    print("[Config] FOV:", Config.FOV .. "°")
+end
 
-        local ESP_Settings = {
-            Enabled = false,
-            LimitDistance = 2000,
-            TeamCheck = false,
-            TextSize = 13,
-            Font = 2,
-            Box = { Enabled = false, Color = Color3.fromRGB(255, 255, 255), Outline = true },
-            BoxFill = { Enabled = false, Color = Color3.fromRGB(255, 255, 255), Transparency = 0.5 },
-            Name = { Enabled = false, Color = Color3.fromRGB(255, 255, 255) },
-            Distance = { Enabled = false, Color = Color3.fromRGB(200, 200, 200) },
-            HealthBar = { Enabled = false },
-            Tracer = { Enabled = false, Origin = "Bottom", Color = Color3.fromRGB(255, 255, 255) },
-            Skeleton = { Enabled = false, Color = Color3.fromRGB(255, 255, 255), Thickness = 1 },
-            Chams = {
-                Enabled = false,
-                FillColor = Color3.fromRGB(255, 0, 0),
-                OutlineColor = Color3.fromRGB(255, 255, 255),
-                FillTransparency = 0.5,
-                OutlineTransparency = 0
-            }
-    }[cite:1]
-
-        local Aimbot = {
-            Enabled = false,
-            ToggleMode = false,
-            TeamCheck = false,
-            VisibleCheck = false,
-            AimPart = "Head",
-            FOV = 160,
-            FOV_Enabled = false,
-            FOV_Color = Color3.fromRGB(255, 0, 255),
-            FOV_LockedColor = Color3.fromRGB(0, 255, 0),
-            Smoothness = 10,
-            Prediction = false,
-            PredictionAmount = 0.142
-    }[cite:1]
-
-        -- // NEW SILENT AIM SETTINGS //
-        local SilentSettings = {
-            Enabled = false,
-            TeamCheck = false,
-            VisibleCheck = false,
-            AimPart = "Head",
-            FOV = 600,
-            FOV_Enabled = false,
-            TriggerBot = false,
-            TriggerDelay = 0.1
-    }
-
-        local SilentCircle = Drawing.new("Circle")
-        SilentCircle.Thickness = 1
-        SilentCircle.Color = Color3.fromRGB(0, 255, 255)
-        SilentCircle.Visible = false
-
-        local function GetSilentTarget()
-        local target = nil
-        local shortestDist = SilentSettings.FOV
-        for _, plr in pairs(Players:GetPlayers()) do
-            if plr == LocalPlayer or not plr.Character or not plr.Character:FindFirstChild("Humanoid") then continue end
-                if SilentSettings.TeamCheck and plr.Team == LocalPlayer.Team then continue end
-                    if plr.Character.Humanoid.Health <= 0 then continue end
-                        local part = plr.Character : FindFirstChild(SilentSettings.AimPart) or plr.Character : FindFirstChild("HumanoidRootPart")
-                        if part then
-                            local pos, onScreen = Camera : WorldToViewportPoint(part.Position)
-                            if onScreen then
-                                local dist = (Vector2.new(pos.X, pos.Y) - UserInputService:GetMouseLocation()).Magnitude
-                                if dist < shortestDist then
-                                    if SilentSettings.VisibleCheck then
-                                        local rayParams = RaycastParams.new()
-                                        rayParams.FilterDescendantsInstances = { LocalPlayer.Character }
-                                        local ray = Workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, rayParams)
-                                        if ray and not ray.Instance : IsDescendantOf(plr.Character) then continue end
-                                            end
-                                            target = part
-                                            shortestDist = dist
-                                            end
-                                            end
-                                            end
-                                            end
-                                            return target
-                                            end
-
-                                            -- // SILENT AIM HOOK //
-                                            task.spawn(function()
-                                                local b_success, BulletModule = pcall(function()
-                                                    return require(game:GetService("ReplicatedStorage").ModuleScripts.GunModules.BulletHandler)
-                                                    end)
-                                                if b_success and BulletModule then
-                                                    local oldFire = BulletModule.Fire
-                                                    BulletModule.Fire = function(obj)
-                                                    if SilentSettings.Enabled then
-                                                        local target = GetSilentTarget()
-                                                        if target then obj.Direction = (target.Position - obj.Origin).Unit end
-                                                            end
-                                                            return oldFire(obj)
-                                                            end
-                                                            end
-                                                            end)
-
-                                            -- // TRIGGER BOT //
-                                            task.spawn(function()
-                                                while task.wait() do
-                                                    if SilentSettings.TriggerBot and SilentSettings.Enabled then
-                                                        local target = GetSilentTarget()
-                                                        if target then
-                                                            if mouse1press then
-                                                                mouse1press(); task.wait(0.02); mouse1release()
-                                                            else
-                                                                local vu = game:GetService("VirtualUser")
-                                                                vu : Button1Down(Vector2.new(0, 0), Camera.CFrame)
-                                                                task.wait(0.02)
-                                                                vu : Button1Up(Vector2.new(0, 0), Camera.CFrame)
-                                                                end
-                                                                task.wait(SilentSettings.TriggerDelay)
-                                                                end
-                                                                end
-                                                                end
-                                                                end)
-
-                                            local ESP_Cache = {}
-                                            local function NewDrawing(Type, Properties)
-                                            local Obj = Drawing.new(Type)
-                                            for k, v in pairs(Properties) do Obj[k] = v end
-                                                return Obj
-                                                end[cite:1]
-
-                                                local function CreateESP(Player)
-                                                local Objects = {
-                                                    Box = NewDrawing("Square", {Thickness = 1, ZIndex = 2, Visible = false}),
-                                                    BoxOutline = NewDrawing("Square", {Thickness = 3, Color = Color3.new(0,0,0), ZIndex = 1, Visible = false}),
-                                                    BoxFill = NewDrawing("Square", {Filled = true, ZIndex = 0, Visible = false}),
-                                                    Name = NewDrawing("Text", {Text = Player.Name, Center = true, Size = ESP_Settings.TextSize, Font = ESP_Settings.Font, Outline = true, ZIndex = 3, Visible = false}),
-                                                    Distance = NewDrawing("Text", {Center = true, Size = ESP_Settings.TextSize - 1, Font = ESP_Settings.Font, Outline = true, ZIndex = 3, Visible = false}),
-                                                    HealthBar = NewDrawing("Square", {Filled = true, ZIndex = 2, Visible = false}),
-                                                    HealthBarOutline = NewDrawing("Square", {Filled = true, Color = Color3.new(0,0,0), ZIndex = 1, Visible = false}),
-                                                    Tracer = NewDrawing("Line", {Thickness = 1, ZIndex = 2, Visible = false}),
-                                                    TracerOutline = NewDrawing("Line", {Thickness = 3, Color = Color3.new(0,0,0), ZIndex = 1, Visible = false}),
-                                                    SkeletonLines = {},
-                                                    Highlight = nil
-                                            }[cite:1]
-
-                                                for i = 1, 16 do
-                                                    table.insert(Objects.SkeletonLines, NewDrawing("Line", { Thickness = 1, ZIndex = 2, Visible = false }))
-                                                    end
-                                                    ESP_Cache[Player] = Objects
-                                                    end[cite:1]
-
-                                                    local function RemoveESP(Player)
-                                                    if ESP_Cache[Player] then
-                                                        for k, v in pairs(ESP_Cache[Player]) do
-                                                            if k == "Highlight" and v then v : Destroy()
-                                                                elseif k == "SkeletonLines" then for _, line in pairs(v) do line : Remove() end
-                                                                elseif v and v.Remove then v : Remove() end
-                                                                end
-                                                                ESP_Cache[Player] = nil
-                                                                end
-                                                                end[cite:1]
-
-                                                                local SkeletonConnections = {
-                                                                    {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-                                                                    {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
-                                                                    {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
-                                                                    {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
-                                                                    {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"},
-                                                                    {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
-                                                                    {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
-                                                            }[cite:1]
-
-                                                                RunService.RenderStepped:Connect(function()
-                                                                    SilentCircle.Visible = SilentSettings.FOV_Enabled
-                                                                    SilentCircle.Radius = SilentSettings.FOV
-                                                                    SilentCircle.Position = UserInputService:GetMouseLocation()
-
-                                                                    for Player, Objects in pairs(ESP_Cache) do
-                                                                        local Character = Player.Character
-                                                                        local Humanoid = Character and Character : FindFirstChild("Humanoid")
-                                                                        local RootPart = Character and Character : FindFirstChild("HumanoidRootPart")
-                                                                        local IsValid = ESP_Settings.Enabled and Character and Humanoid and RootPart and Humanoid.Health > 0
-                                                                        local IsTeammate = ESP_Settings.TeamCheck and Player.Team == LocalPlayer.Team
-
-                                                                        if IsValid and not IsTeammate then
-                                                                            local HRP_Pos, OnScreen = Camera:WorldToViewportPoint(RootPart.Position)
-                                                                            local Dist = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) and (LocalPlayer.Character.HumanoidRootPart.Position - RootPart.Position).Magnitude or 0
-
-                                                                            if ESP_Settings.Chams.Enabled then
-                                                                                if not Objects.Highlight or Objects.Highlight.Parent ~= Character then
-                                                                                    if Objects.Highlight then Objects.Highlight : Destroy() end
-                                                                                        local HL = Instance.new("Highlight")
-                                                                                        HL.Parent = Character; HL.Adornee = Character; HL.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                                                                                        Objects.Highlight = HL
-                                                                                        end
-                                                                                        Objects.Highlight.FillColor = ESP_Settings.Chams.FillColor; Objects.Highlight.OutlineColor = ESP_Settings.Chams.OutlineColor
-                                                                                        Objects.Highlight.FillTransparency = ESP_Settings.Chams.FillTransparency; Objects.Highlight.OutlineTransparency = ESP_Settings.Chams.OutlineTransparency
-                                                                                        Objects.Highlight.Enabled = true
-                                                                                        elseif Objects.Highlight then Objects.Highlight:Destroy() Objects.Highlight = nil end
-
-                                                                                        if OnScreen and Dist <= ESP_Settings.LimitDistance then
-                                                                                            local ScaleFactor = 1 / (HRP_Pos.Z * math.tan(math.rad(Camera.FieldOfView * 0.5)) * 2) * 1000
-                                                                                            local Width, Height = math.floor(4 * ScaleFactor), math.floor(6 * ScaleFactor)
-                                                                                            local BoxPos = Vector2.new(math.floor(HRP_Pos.X - Width * 0.5), math.floor(HRP_Pos.Y - Height * 0.5))
-
-                                                                                            if ESP_Settings.Box.Enabled then
-                                                                                                Objects.Box.Size = Vector2.new(Width, Height); Objects.Box.Position = BoxPos; Objects.Box.Color = ESP_Settings.Box.Color; Objects.Box.Visible = true
-                                                                                                Objects.BoxOutline.Size = Vector2.new(Width, Height); Objects.BoxOutline.Position = BoxPos; Objects.BoxOutline.Visible = ESP_Settings.Box.Outline
-                                                                                            else Objects.Box.Visible = false; Objects.BoxOutline.Visible = false end
-
-                                                                                                if ESP_Settings.BoxFill.Enabled and ESP_Settings.Box.Enabled then
-                                                                                                    Objects.BoxFill.Size = Vector2.new(Width, Height); Objects.BoxFill.Position = BoxPos; Objects.BoxFill.Color = ESP_Settings.BoxFill.Color; Objects.BoxFill.Transparency = ESP_Settings.BoxFill.Transparency; Objects.BoxFill.Visible = true
-                                                                                                else Objects.BoxFill.Visible = false end
-
-                                                                                                    if ESP_Settings.Name.Enabled then
-                                                                                                        Objects.Name.Position = Vector2.new(BoxPos.X + Width / 2, BoxPos.Y - Objects.Name.TextBounds.Y - 2); Objects.Name.Color = ESP_Settings.Name.Color; Objects.Name.Visible = true
-                                                                                                    else Objects.Name.Visible = false end
-
-                                                                                                        if ESP_Settings.Distance.Enabled then
-                                                                                                            Objects.Distance.Text = math.floor(Dist) .. "m"; Objects.Distance.Position = Vector2.new(BoxPos.X + Width / 2, BoxPos.Y + Height + 2); Objects.Distance.Color = ESP_Settings.Distance.Color; Objects.Distance.Visible = true
-                                                                                                        else Objects.Distance.Visible = false end
-
-                                                                                                            if ESP_Settings.HealthBar.Enabled then
-                                                                                                                local BarWidth = 2; local HealthY = Height * (Humanoid.Health / Humanoid.MaxHealth)
-                                                                                                                Objects.HealthBarOutline.Size = Vector2.new(BarWidth + 2, Height + 2); Objects.HealthBarOutline.Position = Vector2.new(BoxPos.X - BarWidth - 6, BoxPos.Y - 1); Objects.HealthBarOutline.Visible = true
-                                                                                                                Objects.HealthBar.Size = Vector2.new(BarWidth, HealthY); Objects.HealthBar.Position = Vector2.new(BoxPos.X - BarWidth - 5, BoxPos.Y + (Height - HealthY)); Objects.HealthBar.Color = Color3.fromHSV((Humanoid.Health / Humanoid.MaxHealth) * 0.3, 1, 1); Objects.HealthBar.Visible = true
-                                                                                                            else Objects.HealthBar.Visible = false; Objects.HealthBarOutline.Visible = false end
-
-                                                                                                                if ESP_Settings.Tracer.Enabled then
-                                                                                                                    local Origin = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                                                                                                                    if ESP_Settings.Tracer.Origin == "Center" then Origin = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-                                                                                                                        elseif ESP_Settings.Tracer.Origin == "Mouse" then local M = UserInputService:GetMouseLocation() Origin = Vector2.new(M.X, M.Y) end
-                                                                                                                        Objects.Tracer.From = Origin; Objects.Tracer.To = Vector2.new(HRP_Pos.X, HRP_Pos.Y); Objects.Tracer.Color = ESP_Settings.Tracer.Color; Objects.Tracer.Visible = true
-                                                                                                                        Objects.TracerOutline.From = Origin; Objects.TracerOutline.To = Vector2.new(HRP_Pos.X, HRP_Pos.Y); Objects.TracerOutline.Visible = true
-                                                                                                                    else Objects.Tracer.Visible = false; Objects.TracerOutline.Visible = false end
-
-                                                                                                                        if ESP_Settings.Skeleton.Enabled then
-                                                                                                                            local idx = 1
-                                                                                                                            for _, pair in ipairs(SkeletonConnections) do
-                                                                                                                                local p1, p2 = Character:FindFirstChild(pair[1]), Character : FindFirstChild(pair[2])
-                                                                                                                                if p1 and p2 then
-                                                                                                                                    local pos1, on1 = Camera : WorldToViewportPoint(p1.Position)
-                                                                                                                                    local pos2, on2 = Camera : WorldToViewportPoint(p2.Position)
-                                                                                                                                    if on1 or on2 then
-                                                                                                                                        local line = Objects.SkeletonLines[idx]
-                                                                                                                                        if line then line.From = Vector2.new(pos1.X, pos1.Y); line.To = Vector2.new(pos2.X, pos2.Y); line.Color = ESP_Settings.Skeleton.Color; line.Thickness = ESP_Settings.Skeleton.Thickness; line.Visible = true; idx = idx + 1 end
-                                                                                                                                            end
-                                                                                                                                            end
-                                                                                                                                            end
-                                                                                                                                            for i = idx, #Objects.SkeletonLines do Objects.SkeletonLines[i].Visible = false end
-                                                                                                                                        else for _, line in pairs(Objects.SkeletonLines) do line.Visible = false end end
-                                                                                                                                    else for k, v in pairs(Objects) do if k == "SkeletonLines" then for _, l in pairs(v) do l.Visible = false end elseif typeof(v) ~= "Instance" then v.Visible = false end end end
-                                                                                                                                    else for k, v in pairs(Objects) do if k == "SkeletonLines" then for _, l in pairs(v) do l.Visible = false end elseif typeof(v) ~= "Instance" then v.Visible = false end end if Objects.Highlight then Objects.Highlight:Destroy() Objects.Highlight = nil end end
-                                                                                                                                        end
-                                                                                                                                        end)[cite:1]
-
-                                                                                                                                        Players.PlayerAdded:Connect(CreateESP)
-                                                                                                                                        Players.PlayerRemoving : Connect(RemoveESP)
-                                                                                                                                        for _, Plr in ipairs(Players : GetPlayers()) do if Plr ~= LocalPlayer then CreateESP(Plr) end end
-
-                                                                                                                                            local FOV_ScreenGui = Instance.new("ScreenGui")
-                                                                                                                                            FOV_ScreenGui.Name = "DINAS_FOV"; FOV_ScreenGui.ResetOnSpawn = false; FOV_ScreenGui.IgnoreGuiInset = true; FOV_ScreenGui.DisplayOrder = 9999; FOV_ScreenGui.Parent = game:GetService("CoreGui")
-                                                                                                                                            local FOV_Frame = Instance.new("Frame")
-                                                                                                                                            FOV_Frame.BackgroundTransparency = 1; FOV_Frame.AnchorPoint = Vector2.new(0.5, 0.5); FOV_Frame.Position = UDim2.new(0.5, 0, 0.5, 0); FOV_Frame.Size = UDim2.new(0, Aimbot.FOV * 2, 0, Aimbot.FOV * 2); FOV_Frame.Parent = FOV_ScreenGui
-                                                                                                                                            local Stroke = Instance.new("UIStroke")
-                                                                                                                                            Stroke.Thickness = 2.5; Stroke.Color = Aimbot.FOV_Color; Stroke.Transparency = 0.25; Stroke.Parent = FOV_Frame
-                                                                                                                                            local Corner = Instance.new("UICorner")
-                                                                                                                                            Corner.CornerRadius = UDim.new(1, 0); Corner.Parent = FOV_Frame[cite:1]
-
-                                                                                                                                            local function UpdateFOV()
-                                                                                                                                            FOV_Frame.Size = UDim2.new(0, Aimbot.FOV * 2, 0, Aimbot.FOV * 2)
-                                                                                                                                            FOV_Frame.Visible = Aimbot.FOV_Enabled and Aimbot.Enabled
-                                                                                                                                            Stroke.Color = Aimbot.FOV_Color
-                                                                                                                                            end[cite:1]
-
-                                                                                                                                            local function GetTarget()
-                                                                                                                                            local closest, bestDist = nil, Aimbot.FOV
-                                                                                                                                            for _, plr in Players : GetPlayers() do
-                                                                                                                                                if plr == LocalPlayer or not plr.Character or plr.Character : FindFirstChild("Humanoid").Health <= 0 then continue end
-                                                                                                                                                    if Aimbot.TeamCheck and plr.Team == LocalPlayer.Team then continue end
-                                                                                                                                                        local part = plr.Character : FindFirstChild(Aimbot.AimPart) or plr.Character : FindFirstChild("HumanoidRootPart")
-                                                                                                                                                        if part then
-                                                                                                                                                            local pos = part.Position
-                                                                                                                                                            if Aimbot.Prediction then pos = pos + (part.Velocity * Aimbot.PredictionAmount) end
-                                                                                                                                                                local screenPos, onScreen = Camera : WorldToViewportPoint(pos)
-                                                                                                                                                                if onScreen then
-                                                                                                                                                                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude
-                                                                                                                                                                    if dist < bestDist then
-                                                                                                                                                                        if Aimbot.VisibleCheck then
-                                                                                                                                                                            local result = Workspace : Raycast(Camera.CFrame.Position, pos - Camera.CFrame.Position, RaycastParams.new())
-                                                                                                                                                                            if result and not result.Instance : IsDescendantOf(plr.Character) then continue end
-                                                                                                                                                                                end
-                                                                                                                                                                                bestDist = dist; closest = pos
-                                                                                                                                                                                end
-                                                                                                                                                                                end
-                                                                                                                                                                                end
-                                                                                                                                                                                end
-                                                                                                                                                                                return closest
-                                                                                                                                                                                end[cite:1]
-
-                                                                                                                                                                                RunService.Heartbeat:Connect(function()
-                                                                                                                                                                                    UpdateFOV()
-                                                                                                                                                                                    local shouldAim = Aimbot.Enabled and (Aimbot.ToggleMode or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2))
-                                                                                                                                                                                    if not shouldAim then Stroke.Color = Aimbot.FOV_Color; return end
-                                                                                                                                                                                        local target = GetTarget()
-                                                                                                                                                                                        if target then Stroke.Color = Aimbot.FOV_LockedColor; Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, target), 1 / Aimbot.Smoothness)
-                                                                                                                                                                                        else Stroke.Color = Aimbot.FOV_Color end
-                                                                                                                                                                                            end)[cite:1]
-
-                                                                                                                                                                                            Library:Watermark("DINAS PROJECT | V 1.0")
-                                                                                                                                                                                            local Window = Library : Window("DINAS PROJECT")
-
-                                                                                                                                                                                            -- // NEW SILENT AIM TAB //
-                                                                                                                                                                                            local SilentTab = Window : Tab("Silent Aim")
-                                                                                                                                                                                            local SPage = SilentTab : SubTab("Main")
-                                                                                                                                                                                            local SControl = SPage : Groupbox("Silent Aim Control", "Left")
-                                                                                                                                                                                            SControl : AddToggle({ Title = "Enable Silent Aim", Default = false, Callback = function(v) SilentSettings.Enabled = v end })
-                                                                                                                                                                                            SControl : AddToggle({ Title = "Enable Trigger Bot", Default = false, Callback = function(v) SilentSettings.TriggerBot = v end })
-                                                                                                                                                                                            SControl : AddDropdown({ Title = "Aim Part", Values = {"Head", "HumanoidRootPart", "UpperTorso"}, Default = "Head", Callback = function(v) SilentSettings.AimPart = v end })
-                                                                                                                                                                                            SPage : Groupbox("Checks", "Left") : AddToggle({ Title = "Wall Check", Default = false, Callback = function(v) SilentSettings.VisibleCheck = v end })
-                                                                                                                                                                                            local SFov = SPage : Groupbox("FOV Settings", "Right")
-                                                                                                                                                                                            SFov : AddToggle({ Title = "Show FOV Circle", Default = false, Callback = function(v) SilentSettings.FOV_Enabled = v end })
-                                                                                                                                                                                            SFov : AddSlider({ Title = "FOV Size", Min = 10, Max = 800, Default = 600, Callback = function(v) SilentSettings.FOV = v end })
-                                                                                                                                                                                            SFov : AddSlider({ Title = "Trigger Delay", Min = 0.01, Max = 0.5, Default = 0.1, Callback = function(v) SilentSettings.TriggerDelay = v end })
-
-                                                                                                                                                                                            local VisualsTab = Window : Tab("Visuals")
-                                                                                                                                                                                            local EspPage = VisualsTab : SubTab("ESP")
-                                                                                                                                                                                            local ChamsPage = VisualsTab : SubTab("Chams")
-                                                                                                                                                                                            local MasterGroup = EspPage : Groupbox("Activation", "Left")
-                                                                                                                                                                                            MasterGroup : AddToggle({ Title = "Enable ESP", Default = false, Callback = function(V) ESP_Settings.Enabled = V end })
-                                                                                                                                                                                            local ElementsGroup = EspPage : Groupbox("Elements", "Left")
-                                                                                                                                                                                            ElementsGroup : AddToggle({ Title = "Boxes", Default = false, Callback = function(V) ESP_Settings.Box.Enabled = V end })
-                                                                                                                                                                                            ElementsGroup : AddToggle({ Title = "Skeleton", Default = false, Callback = function(V) ESP_Settings.Skeleton.Enabled = V end })
-                                                                                                                                                                                            ElementsGroup : AddToggle({ Title = "Names", Default = false, Callback = function(V) ESP_Settings.Name.Enabled = V end })
-                                                                                                                                                                                            ElementsGroup : AddToggle({ Title = "Health Bar", Default = false, Callback = function(V) ESP_Settings.HealthBar.Enabled = V end })
-                                                                                                                                                                                            ElementsGroup : AddToggle({ Title = "Distance", Default = false, Callback = function(V) ESP_Settings.Distance.Enabled = V end })
-                                                                                                                                                                                            ElementsGroup : AddToggle({ Title = "Tracers", Default = false, Callback = function(V) ESP_Settings.Tracer.Enabled = V end })
-                                                                                                                                                                                            local EspSettingsGroup = EspPage : Groupbox("Settings", "Right")
-                                                                                                                                                                                            EspSettingsGroup : AddColorPicker({ Title = "Box Color", Default = ESP_Settings.Box.Color, Callback = function(V) ESP_Settings.Box.Color = V end })
-                                                                                                                                                                                            EspSettingsGroup : AddColorPicker({ Title = "Skeleton Color", Default = ESP_Settings.Skeleton.Color, Callback = function(V) ESP_Settings.Skeleton.Color = V end })
-                                                                                                                                                                                            EspSettingsGroup : AddColorPicker({ Title = "Name Color", Default = ESP_Settings.Name.Color, Callback = function(V) ESP_Settings.Name.Color = V end })
-                                                                                                                                                                                            EspSettingsGroup : AddToggle({ Title = "Box Fill", Default = false, Callback = function(V) ESP_Settings.BoxFill.Enabled = V end })
-                                                                                                                                                                                            EspSettingsGroup : AddColorPicker({ Title = "Fill Color", Default = ESP_Settings.BoxFill.Color, Callback = function(V) ESP_Settings.BoxFill.Color = V end })
-                                                                                                                                                                                            EspSettingsGroup : AddSlider({ Title = "Max Distance", Min = 100, Max = 5000, Default = 2000, Suffix = " studs", Callback = function(V) ESP_Settings.LimitDistance = V end })
-                                                                                                                                                                                            local ChamsGroup = ChamsPage : Groupbox("Chams", "Left")
-                                                                                                                                                                                            ChamsGroup : AddToggle({ Title = "Enable Chams", Default = false, Callback = function(V) ESP_Settings.Chams.Enabled = V end })
-                                                                                                                                                                                            ChamsGroup : AddColorPicker({ Title = "Fill Color", Default = ESP_Settings.Chams.FillColor, Callback = function(V) ESP_Settings.Chams.FillColor = V end })
-                                                                                                                                                                                            ChamsGroup : AddColorPicker({ Title = "Outline Color", Default = ESP_Settings.Chams.OutlineColor, Callback = function(V) ESP_Settings.Chams.OutlineColor = V end })[cite:1]
-
-                                                                                                                                                                                            local AimbotTab = Window : Tab("Aimbot")
-                                                                                                                                                                                            local Page = AimbotTab : SubTab("Main")
-                                                                                                                                                                                            Page : Groupbox("Aimbot Control", "Left") : AddToggle({ Title = "Enable Aimbot", Default = false, Callback = function(v) Aimbot.Enabled = v end })
-                                                                                                                                                                                            Page : Groupbox("Aimbot Control", "Left") : AddToggle({ Title = "Toggle Mode (Mobile Friendly)", Default = false, Description = "ON / OFF", Callback = function(v) Aimbot.ToggleMode = v end })
-                                                                                                                                                                                            Page : Groupbox("Aimbot Control", "Left") : AddDropdown({ Title = "Aim Part", Values = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"}, Default = "Head", Callback = function(v) Aimbot.AimPart = v end })
-                                                                                                                                                                                            Page : Groupbox("Checks", "Left") : AddToggle({ Title = "Visible Check (Wall Check)", Default = false, Callback = function(v) Aimbot.VisibleCheck = v end })
-                                                                                                                                                                                            Page : Groupbox("FOV Settings", "Right") : AddToggle({ Title = "Show FOV Circle", Default = false, Callback = function(v) Aimbot.FOV_Enabled = v; UpdateFOV() end })
-                                                                                                                                                                                            Page : Groupbox("FOV Settings", "Right") : AddSlider({ Title = "FOV Size", Min = 10, Max = 600, Default = 160, Callback = function(v) Aimbot.FOV = v; UpdateFOV() end })
-                                                                                                                                                                                            Page : Groupbox("FOV Settings", "Right") : AddColorPicker({ Title = "FOV Color", Default = Aimbot.FOV_Color, Callback = function(v) Aimbot.FOV_Color = v; UpdateFOV() end })
-                                                                                                                                                                                            Page : Groupbox("FOV Settings", "Right") : AddColorPicker({ Title = "Locked Color", Default = Aimbot.FOV_LockedColor, Callback = function(v) Aimbot.FOV_LockedColor = v end })
-                                                                                                                                                                                            Page : Groupbox("Smoothness", "Left") : AddSlider({ Title = "Smoothness", Min = 1, Max = 50, Default = 10, Suffix = " (lower = sharper)", Callback = function(v) Aimbot.Smoothness = v end })[cite:1]
-
-                                                                                                                                                                                            local SettingsTab = Window : Tab("Settings")
-                                                                                                                                                                                            local SettingsPage = SettingsTab : SubTab("Menu Settings")
-                                                                                                                                                                                            local ConfigGroup = SettingsPage : Groupbox("Configuration", "Left")
-                                                                                                                                                                                            local Configs = Library : GetConfigs()
-                                                                                                                                                                                            ConfigGroup : AddDropdown({ Title = "Select Config", Values = Configs, Default = "default", Multi = false, Flag = "SelectedConfig", Callback = function(Value) end })
-                                                                                                                                                                                            ConfigGroup : AddTextbox({ Title = "New Config Name", Placeholder = "Type name...", Flag = "NewConfigName", Callback = function(Value) end })
-                                                                                                                                                                                            ConfigGroup : AddButton({ Title = "Load Selected", Callback = function() local name = Library.Flags["SelectedConfig"] if name then Library : LoadConfig(name) else Library:Notify("Error", "No config selected!", 3) end end })
-                                                                                                                                                                                            ConfigGroup : AddButton({ Title = "Save Config", Callback = function() local name = Library.Flags["NewConfigName"] if name == "" or name == nil then name = Library.Flags["SelectedConfig"] end if name and name ~= "" then Library : SaveConfig(name); local NewList = Library:GetConfigs(); if Library.Items["SelectedConfig"] then Library.Items["SelectedConfig"].Refresh(NewList) end else Library:Notify("Error", "Enter a name!", 3) end end })
-                                                                                                                                                                                            ConfigGroup : AddButton({ Title = "Delete Config", Callback = function() local name = Library.Flags["SelectedConfig"] if name and name ~= "" then Library : DeleteConfig(name); local NewList = Library:GetConfigs(); if Library.Items["SelectedConfig"] then Library.Items["SelectedConfig"].Refresh(NewList) end Library.Flags["SelectedConfig"] = nil else Library:Notify("Error", "Select config!", 3) end end })
-                                                                                                                                                                                            ConfigGroup : AddButton({ Title = "Refresh List", Callback = function() local NewList = Library:GetConfigs(); if Library.Items["SelectedConfig"] then Library.Items["SelectedConfig"].Refresh(NewList) end Library : Notify("Configs", "List refreshed", 2) end })
-                                                                                                                                                                                            local ThemeGroup = SettingsPage : Groupbox("Theme Manager", "Right")
-                                                                                                                                                                                            local ThemeList = {}
-                                                                                                                                                                                            if Library.ThemePresets then
-                                                                                                                                                                                                for ThemeName, _ in pairs(Library.ThemePresets) do table.insert(ThemeList, ThemeName) end
-                                                                                                                                                                                                    table.sort(ThemeList)
-                                                                                                                                                                                                    ThemeGroup : AddDropdown({ Title = "Preset Theme", Values = ThemeList, Default = "Default", Multi = false, Callback = function(Value) if Library.SetTheme then Library : SetTheme(Value) end end })
-                                                                                                                                                                                                    ThemeGroup : AddSeparator()
-                                                                                                                                                                                                    end
-                                                                                                                                                                                                    ThemeGroup : AddLabel("Custom Colors")
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Accent Color", Default = Library.Theme.Accent, Flag = "ThemeAccent", Callback = function(Value) Library:UpdateTheme("Accent", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Background", Default = Library.Theme.Background, Flag = "ThemeBackground", Callback = function(Value) Library:UpdateTheme("Background", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Sidebar", Default = Library.Theme.Sidebar, Flag = "ThemeSidebar", Callback = function(Value) Library:UpdateTheme("Sidebar", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Groupbox", Default = Library.Theme.Groupbox, Flag = "ThemeGroupbox", Callback = function(Value) Library:UpdateTheme("Groupbox", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddLabel("Text & Outlines")
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Main Text", Default = Library.Theme.Text, Flag = "ThemeText", Callback = function(Value) Library:UpdateTheme("Text", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Secondary Text", Default = Library.Theme.TextDark, Flag = "ThemeTextDark", Callback = function(Value) Library:UpdateTheme("TextDark", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddColorPicker({ Title = "Outline/Stroke", Default = Library.Theme.Outline, Flag = "ThemeOutline", Callback = function(Value) Library:UpdateTheme("Outline", Value) end })
-                                                                                                                                                                                                    ThemeGroup : AddButton({ Title = "Reset Theme to Default", Callback = function() Library:SetTheme("Default"); Library:Notify("Theme", "Colors reset", 2) end })
-                                                                                                                                                                                                    local UISettings = SettingsPage : Groupbox("UI Settings", "Right")
-                                                                                                                                                                                                    UISettings : AddToggle({ Title = "Show Watermark", Default = true, Flag = "WatermarkToggle", Callback = function(Value) Library.WatermarkSettings.Enabled = Value end })
-                                                                                                                                                                                                    UISettings : AddTextbox({ Title = "Watermark Text", Default = "RedOnyx", Placeholder = "Enter text...", ClearOnFocus = false, Callback = function(Value) Library.WatermarkSettings.Text = Value end })
-                                                                                                                                                                                                    UISettings : AddButton({ Title = "Unload / Destroy UI", Callback = function() local gui = game:GetService("CoreGui") : FindFirstChild("RedOnyxV17"); local water = game:GetService("CoreGui") : FindFirstChild("Watermark"); if gui then gui : Destroy() end if water then water : Destroy() end end })[cite:1]
-                                                                                                                                                                                                    end
-
-                                                                                                                                                                                                    VerifyBtn.MouseButton1Click : Connect(function()
-                                                                                                                                                                                                        if KeyInput.Text == correctKey then StartScript() else VerifyBtn.Text = "Invalid Key!"; wait(2); VerifyBtn.Text = "Verify" end
-                                                                                                                                                                                                            end)[cite:1]
-
-                                                                                                                                                                                                            GetKeyBtn.MouseButton1Click : Connect(function()
-                                                                                                                                                                                                                setclipboard(keyLink); GetKeyBtn.Text = "Link Copied!"; wait(2); GetKeyBtn.Text = "Get Key"
-                                                                                                                                                                                                                end)[cite:1]
+local success, err = pcall(init)
+if not success then
+    warn("[Ragebot] Initialization error:", err)
+end
